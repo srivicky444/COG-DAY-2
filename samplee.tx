@@ -1,0 +1,59 @@
+Exercise 1: High-Throughput Inventory Reservation System
+Scenario
+An e-commerce platform is launching a flash sale event. When a user clicks "Buy Now," the system must temporarily reserve the item in the warehouse stock for 15 minutes while they complete their checkout. If thousands of users try to buy the last 5 items simultaneously, the system must prevent "overselling" without locking up the entire database.
+Requirements
+Target Framework: FastAPI (Python 3.11+) with Asyncio.
+Concurrency Control: Implement a distributed lock using Redis (e.g., Redlock pattern or a lightweight Lua script) to guarantee that stock deduction is atomic.
+Database Action: Use SQLAlchemy ORM with a pessimistic locking strategy (with_for_update()) on the inventory row to safely decrement the quantity_available.
+State Management: The temporary reservation should expire automatically after 15 minutes if not confirmed.
+Best Practices
+Connection Pooling: Ensure the Redis client and Database engine utilize optimized connection pools to handle high concurrent traffic spikes.
+Graceful Degradation: If the distributed lock cannot be acquired within a specific timeout (e.g., 2 seconds), fail fast and return a clean, user-friendly error rather than letting the request hang.
+Guardrails
+No Race Conditions: The application must never allow the inventory count to drop below zero under any concurrent load.
+Timeout & Deadlock Prevention: Every database transaction and Redis lock must have strict, explicit timeouts to avoid deadlocking the database pool.
+No Sensitive Data Leaks: Do not log internal database row IDs or precise user session tokens in plaintext logs.
+Sample Input/Output
+Input Payload:
+JSON
+ 
+{
+  "user_id": "usr_998877",
+  "item_id": "item_prod_5544",
+  "quantity": 2}
+Expected Behavior (Success):
+Lock acquired -> Stock verified and decremented -> Reservation created.
+Output (HTTP 201): {"status": "reserved", "reservation_id": "res_abc123", "expires_at": "2026-06-09T11:00:00Z"}
+Expected Behavior (Out of Stock / Lock Timeout):
+Lock failed or stock insufficient.
+Output (HTTP 409 Conflict): {"status": "failed", "reason": "item_out_of_stock"}
+Exercise 2: Third-Party AI API Gateway with Rate-Limiting and Fallbacks
+Scenario
+A company relies on a third-party LLM (Large Language Model) provider for user-facing text summarization. Because the external API is expensive and prone to occasional outages or rate limits, the engineering team needs an internal gateway endpoint that acts as a protective shield, caching layer, and routing manager.
+Requirements
+Target Framework: FastAPI (Python 3.11+).
+Rate Limiting: Implement a sliding-window rate limiter via Redis to restrict each corporate internal service (service_id) to a maximum number of tokens per minute.
+Caching Layer: Before calling the external AI API, check Redis for an identical prompt hash. If a match exists, return the cached response.
+Fallback Routing: If the primary AI provider returns an HTTP 5xx error or takes longer than 5 seconds, catch the error and automatically route the request to a secondary, backup AI provider model.
+Best Practices
+Asynchronous Circuit Breaker: Implement a circuit breaker pattern so that if the primary AI provider fails 5 times in a row, the gateway stops calling it entirely for 60 seconds, routing all traffic to the backup instantly.
+Ttl Management: Set a 1-hour expiration on cached AI responses to balance cost savings with data freshness.
+Guardrails
+Isolate Infrastructure Failures: If Redis fails, bypass the cache and rate-limiter gracefully to call the AI provider directly, but log a high-severity alert. Do not crash the application.
+PII Redaction: The incoming payload text may contain names or credit card numbers. Implement a middleware string manipulation or regex mask to strip obvious PII before logging the prompt strings or caching keys.
+Sample Input/Output
+Input Payload:
+JSON
+ 
+{
+  "service_id": "analytics_dash_01",
+  "prompt_text": "Summarize the quarterly financial report for Q1.",
+  "max_tokens": 150}
+Expected Behavior (Cache Hit):
+Prompt hash found in Redis.
+Output (HTTP 200): {"source": "cache", "summary_text": "Q1 performance showed a 12% increase in recurring revenue..."}
+Expected Behavior (Primary Outage -> Fallback Triggered):
+Cache miss -> Primary API times out -> Circuit breaker tracks failure -> Fallback API succeeds.
+Output (HTTP 200): {"source": "fallback_provider", "summary_text": "Q1 performance showed a 12% increase..."}
+ 
+ 
